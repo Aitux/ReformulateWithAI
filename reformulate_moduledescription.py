@@ -46,6 +46,8 @@ STRUCTURED_RESPONSE_FORMAT = {
         },
     },
 }
+USE_RESPONSE_FORMAT = True
+RESPONSE_FORMAT_LOCK = threading.Lock()
 
 _RETRY_ERROR_CANDIDATES = [
     "RateLimitError",
@@ -185,10 +187,17 @@ def call_openai(
     max_retries: int = 5,
     backoff_base: float = 2.0,
 ) -> str:
+    global USE_RESPONSE_FORMAT
     attempt = 0
     while True:
         attempt += 1
         try:
+            with RESPONSE_FORMAT_LOCK:
+                use_structured_output = USE_RESPONSE_FORMAT
+            request_kwargs: Dict[str, Any] = {}
+            if use_structured_output:
+                request_kwargs["response_format"] = STRUCTURED_RESPONSE_FORMAT
+
             response = client.responses.create(
                 model=model,
                 input=[
@@ -209,10 +218,26 @@ def call_openai(
                     },
                     {"role": "user", "content": [{"type": "text", "text": make_prompt(content)}]},
                 ],
-                response_format=STRUCTURED_RESPONSE_FORMAT,
+                **request_kwargs,
             )
             rewritten = extract_rewritten_html(response)
             return rewritten
+        except TypeError as err:
+            message = str(err)
+            if (
+                use_structured_output
+                and "response_format" in message
+                and "unexpected keyword argument" in message
+            ):
+                with RESPONSE_FORMAT_LOCK:
+                    if USE_RESPONSE_FORMAT:
+                        USE_RESPONSE_FORMAT = False
+                        print(
+                            "[WARN] Le SDK OpenAI installé ne supporte pas 'response_format'. "
+                            "Bascule vers un mode JSON assisté."
+                        )
+                continue
+            raise
         except RETRYABLE_EXCEPTIONS as err:
             if attempt > max_retries:
                 raise RuntimeError(f"Échec après {max_retries} tentatives: {err}") from err
@@ -235,6 +260,30 @@ def reformulate_rows(
     lock = threading.Lock()
     total = len(rows)
     completed = 0
+    stop_event = threading.Event()
+
+    def render_progress(current: int, maximum: int) -> str:
+        if maximum <= 0:
+            return "[PROGRESS] |##############################| 100.00% (0/0)"
+        ratio = max(0.0, min(1.0, current / maximum))
+        bar_length = 30
+        filled = int(bar_length * ratio)
+        bar = "#" * filled + "-" * (bar_length - filled)
+        percent = ratio * 100
+        return f"[PROGRESS] |{bar}| {percent:6.2f}% ({current}/{maximum})"
+
+    def progress_worker() -> None:
+        if total > 0:
+            with lock:
+                current = completed
+            print(render_progress(current, total), flush=True)
+        while not stop_event.wait(3):
+            with lock:
+                current = completed
+            print(render_progress(current, total), flush=True)
+        with lock:
+            current = completed
+        print(render_progress(current, total), flush=True)
 
     def process(index: int, text: str) -> Tuple[int, str]:
         if dry_run or not text.strip():
@@ -250,13 +299,18 @@ def reformulate_rows(
             original = row.get(column, "")
             futures.append(executor.submit(process, idx, original))
 
-        for future in as_completed(futures):
-            index, rewritten_text = future.result()
-            rows[index][column] = rewritten_text
-            with lock:
-                completed += 1
-                if completed % 10 == 0 or completed == total:
-                    print(f"[INFO] Progression: {completed}/{total} descriptions traitées.")
+        progress_thread = threading.Thread(target=progress_worker, daemon=True)
+        progress_thread.start()
+
+        try:
+            for future in as_completed(futures):
+                index, rewritten_text = future.result()
+                rows[index][column] = rewritten_text
+                with lock:
+                    completed += 1
+        finally:
+            stop_event.set()
+            progress_thread.join()
 
 
 def main() -> None:
