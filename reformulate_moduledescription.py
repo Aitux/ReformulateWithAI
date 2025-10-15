@@ -205,7 +205,7 @@ def call_openai(
                         "role": "system",
                         "content": [
                             {
-                                "type": "text",
+                                "type": "input_text",
                                 "text": (
                                     "Tu es un assistant qui reformule du contenu HTML en français. "
                                     "Tu conserves toutes les balises et la structure, tout en modifiant "
@@ -216,7 +216,7 @@ def call_openai(
                             }
                         ],
                     },
-                    {"role": "user", "content": [{"type": "text", "text": make_prompt(content)}]},
+                    {"role": "user", "content": [{"type": "input_text", "text": make_prompt(content)}]},
                 ],
                 **request_kwargs,
             )
