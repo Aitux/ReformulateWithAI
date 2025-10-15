@@ -1,0 +1,26 @@
+version: "3.8"
+
+# Set variables like OPENAI_API_KEY, INPUT_CSV, and OUTPUT_CSV in a .env file or your shell before running.
+
+services:
+  reformulator:
+    build:
+      context: .
+    working_dir: /workspace
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - .:/workspace
+    command:
+      - --input
+      - ${INPUT_CSV:-/workspace/gesform_export_formation_prod_20250925.csv}
+      - --output
+      - ${OUTPUT_CSV:-/workspace/gesform_export_formation_prod_20250925_rewritten.csv}
+      - --column
+      - ${COLUMN_NAME:-moduledescription}
+      - --model
+      - ${MODEL:-gpt-4.1-mini}
+      - --workers
+      - ${WORKERS:-5}
+      - --max-retries
+      - ${MAX_RETRIES:-5}

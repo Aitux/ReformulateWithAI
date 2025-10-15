@@ -1,0 +1,306 @@
+"""Reformulates the moduledescription column of a CSV file using the OpenAI API.
+
+Usage example:
+    python reformulate_moduledescription.py --input gesform_export_formation_prod_20250925.csv
+
+This script expects the environment variable OPENAI_API_KEY to be set before execution
+and forces the OpenAI response into a structured JSON payload to réduire la variabilité.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import sys
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import openai
+    from openai import OpenAI
+except ImportError as exc:  # pragma: no cover - handled at runtime
+    raise SystemExit("Le paquet 'openai' est requis. Installez-le avec 'pip install openai'.") from exc
+
+
+DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_WORKERS = 5
+
+STRUCTURED_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "module_description_rewrite",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "rewritten_html": {
+                    "type": "string",
+                    "description": "Version reformulée du contenu HTML d'origine.",
+                }
+            },
+            "required": ["rewritten_html"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+_RETRY_ERROR_CANDIDATES = [
+    "RateLimitError",
+    "ServiceUnavailableError",
+    "APIError",
+    "Timeout",
+    "APITimeoutError",
+]
+_retryable: List[type] = []
+for _name in _RETRY_ERROR_CANDIDATES:
+    _exc = getattr(openai, _name, None)
+    if _exc is None:
+        _exc = getattr(getattr(openai, "error", object()), _name, None)
+    if isinstance(_exc, type) and issubclass(_exc, Exception):
+        _retryable.append(_exc)
+RETRYABLE_EXCEPTIONS = tuple(_retryable) or (Exception,)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Réécrit la colonne moduledescription d'un CSV via l'API OpenAI en parallèle."
+    )
+    parser.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        help="Chemin vers le fichier CSV source.",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Chemin du fichier CSV de sortie. Par défaut, ajoute '_rewritten' avant l'extension.",
+    )
+    parser.add_argument(
+        "--column",
+        "-c",
+        default="moduledescription",
+        help="Nom de la colonne à reformuler.",
+    )
+    parser.add_argument(
+        "--model",
+        "-m",
+        default=DEFAULT_MODEL,
+        help=f"Nom du modèle OpenAI à utiliser (défaut: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"Nombre de threads simultanés (défaut: {DEFAULT_WORKERS}).",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=5,
+        help="Nombre maximum de tentatives par appel d'API en cas d'erreur transitoire.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Ne contacte pas l'API. Utile pour tester les entrées/sorties.",
+    )
+    return parser.parse_args()
+
+
+def build_output_path(input_path: str, provided_output: Optional[str]) -> str:
+    if provided_output:
+        return provided_output
+    base, ext = os.path.splitext(input_path)
+    ext = ext or ".csv"
+    return f"{base}_rewritten{ext}"
+
+
+def load_rows(path: str, delimiter: str = ";") -> Tuple[List[Dict[str, str]], List[str]]:
+    with open(path, "r", encoding="utf-8-sig", newline="") as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=delimiter, quotechar='"')
+        rows = list(reader)
+        headers = reader.fieldnames
+    if headers is None:
+        raise ValueError("Impossible de déterminer les colonnes du CSV.")
+    return rows, headers
+
+
+def save_rows(path: str, headers: List[str], rows: List[Dict[str, str]], delimiter: str = ";") -> None:
+    with open(path, "w", encoding="utf-8", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=headers, delimiter=delimiter, quotechar='"')
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def create_client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("La variable d'environnement OPENAI_API_KEY doit être définie.")
+    return OpenAI(api_key=api_key)
+
+
+def make_prompt(content: str) -> str:
+    return (
+        "Réécris le texte HTML suivant en français en conservant toutes les balises et le sens global. "
+        "Varie la formulation pour éviter le contenu dupliqué, mais ne supprime aucune information utile.\n\n"
+        f"Texte d'origine:\n{content}"
+    )
+
+
+def extract_rewritten_html(response: Any) -> str:
+    outputs = getattr(response, "output", None)
+    if not outputs:
+        raise ValueError("Réponse sans contenu exploitable.")
+
+    for block in outputs:
+        contents = getattr(block, "content", None) or []
+        for content in contents:
+            json_payload = getattr(content, "json", None)
+            if isinstance(json_payload, dict):
+                candidate = json_payload.get("rewritten_html")
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            text_payload = getattr(content, "text", None)
+            if isinstance(text_payload, str) and text_payload.strip():
+                try:
+                    parsed = json.loads(text_payload)
+                except json.JSONDecodeError:
+                    continue
+                candidate = parsed.get("rewritten_html")
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+
+    raise ValueError("Impossible d'extraire le champ 'rewritten_html' de la réponse.")
+
+
+def call_openai(
+    client: OpenAI,
+    model: str,
+    content: str,
+    max_retries: int = 5,
+    backoff_base: float = 2.0,
+) -> str:
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            response = client.responses.create(
+                model=model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Tu es un assistant qui reformule du contenu HTML en français. "
+                                    "Tu conserves toutes les balises et la structure, tout en modifiant "
+                                    "les phrases pour éviter le contenu dupliqué. "
+                                    "Respecte strictement le format de sortie JSON contenant une seule "
+                                    "clé 'rewritten_html'."
+                                ),
+                            }
+                        ],
+                    },
+                    {"role": "user", "content": [{"type": "text", "text": make_prompt(content)}]},
+                ],
+                response_format=STRUCTURED_RESPONSE_FORMAT,
+            )
+            rewritten = extract_rewritten_html(response)
+            return rewritten
+        except RETRYABLE_EXCEPTIONS as err:
+            if attempt > max_retries:
+                raise RuntimeError(f"Échec après {max_retries} tentatives: {err}") from err
+            sleep_for = backoff_base ** attempt + (0.1 * attempt)
+            print(f"[WARN] Tentative {attempt}/{max_retries} échouée ({err}). Nouvelle tentative dans {sleep_for:.1f}s.")
+            time.sleep(sleep_for)
+        except Exception:
+            raise
+
+
+def reformulate_rows(
+    rows: List[Dict[str, str]],
+    column: str,
+    client: Optional[OpenAI],
+    model: str,
+    workers: int,
+    max_retries: int,
+    dry_run: bool = False,
+) -> None:
+    lock = threading.Lock()
+    total = len(rows)
+    completed = 0
+
+    def process(index: int, text: str) -> Tuple[int, str]:
+        if dry_run or not text.strip():
+            return index, text
+        if client is None:
+            raise RuntimeError("Client OpenAI non initialisé.")
+        rewritten = call_openai(client, model, text, max_retries=max_retries)
+        return index, rewritten
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures: List[Future[Tuple[int, str]]] = []
+        for idx, row in enumerate(rows):
+            original = row.get(column, "")
+            futures.append(executor.submit(process, idx, original))
+
+        for future in as_completed(futures):
+            index, rewritten_text = future.result()
+            rows[index][column] = rewritten_text
+            with lock:
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    print(f"[INFO] Progression: {completed}/{total} descriptions traitées.")
+
+
+def main() -> None:
+    args = parse_args()
+
+    input_path = args.input
+    output_path = build_output_path(input_path, args.output)
+
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"Fichier introuvable: {input_path}")
+
+    rows, headers = load_rows(input_path)
+    if args.column not in headers:
+        raise ValueError(
+            f"La colonne '{args.column}' n'existe pas dans le fichier. Colonnes disponibles: {', '.join(headers)}"
+        )
+
+    print(f"[INFO] {len(rows)} lignes chargées depuis {input_path}.")
+    print(f"[INFO] Colonne ciblée: {args.column}")
+    if args.dry_run:
+        print("[INFO] Mode dry-run activé: aucun appel API ne sera effectué.")
+
+    client = create_client() if not args.dry_run else None
+
+    try:
+        reformulate_rows(
+            rows=rows,
+            column=args.column,
+            client=client,
+            model=args.model,
+            workers=max(1, args.workers),
+            max_retries=args.max_retries,
+            dry_run=args.dry_run,
+        )
+    except Exception as err:
+        raise SystemExit(f"Erreur pendant la reformulation: {err}") from err
+
+    save_rows(output_path, headers, rows)
+    print(f"[INFO] Fichier reformulé enregistré dans: {output_path}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[INFO] Interruption utilisateur. Aucun fichier n'a été généré.", file=sys.stderr)
+        sys.exit(130)
