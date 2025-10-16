@@ -9,12 +9,13 @@ RUN pip install --no-cache-dir uv
 
 COPY reformulator/pyproject.toml /tmp/project/pyproject.toml
 COPY reformulator/uv.lock /tmp/project/uv.lock
-
+RUN uv export --format requirements-txt --no-dev --locked --project /tmp/project > /tmp/project/requirements.txt
 RUN uv pip install \
         --system \
         --break-system-packages \
         --no-cache \
-        -r /tmp/project/uv.lock
+        -r /tmp/project/requirements.txt
+        
 
 COPY reformulator/reformulate_moduledescription.py /workspace/reformulator/
 

@@ -1,7 +1,4 @@
-version: "3.8"
-
 # Set variables like OPENAI_API_KEY, INPUT_CSV, and OUTPUT_CSV in a .env file or your shell before running.
-
 services:
   reformulator:
     build:
