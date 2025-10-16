@@ -32,7 +32,7 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
     raise SystemExit("Le paquet 'openai' est requis. Installez-le avec 'pip install openai'.") from exc
 
 
-DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_MODEL = "gpt-5-chat-latest"
 DEFAULT_WORKERS = 5
 
 ASCII_LOGO = (
