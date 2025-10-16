@@ -35,22 +35,75 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_WORKERS = 5
 
+ASCII_LOGO = (
+    "                                                                                                                  %%%%%%%%%                                               \n"
+    "                                                                                                                 %%%%%%%%%%%%                                             \n"
+    "                                                                                                                %%%%%%%%%%%%%%                                            \n"
+    "                                                                                                               %%%%%%%%% %%%%%%                                           \n"
+    "                                                                                                              %%%%%%%%%   %%%%%%                                          \n"
+    "                                              @@@        @@@         @@         @@@        @@@       @@@     %%%%%% %%%   %%%%%%                                          \n"
+    "                                            @@@@@@@    @@@@@@@     @@@@@@@    @@@@@@@    @@@@@@@   @@@@@@@   %%%%%  %%%   %%%%%%                                          \n"
+    "                                           @@@@@@@@@  @@@@@@@@@   @@@@@@@@@  @@@@@@@@@  @@@@@@@@@ @@@@@@@@@  %%%%%%%%%%     %%%%%                                         \n"
+    "                                          @@@@   @@@  @@@   @@@@ @@@@   @@@ @@@@   @@@@@@@@   @@@@@@@   @@@ %%%%%%%%%%%      %%%%                                         \n"
+    "                                          @@@     @@@@@@     @@@ @@@     @@ @@@     @@@@@@@       @@@       %%%%%%%%%%%     %%%%%                                         \n"
+    "                                          @@      @@@@@@        @@@         @@@@@@@@@@@ @@@@@@@   @@@@@@@@  %%%%%%  %%%   %%%%%%%                                         \n"
+    "                                          @@      @@@@@@        @@@         @@@@@@@@@@@  @@@@@@@   @@@@@@@@ %%%%%%  %%%   %%%%%%%                                         \n"
+    "                                          @@@     @@@@@@     @@@ @@@     @@ @@@              @@@@      @@@@  %%%%%  %%%   %%%%%%%                                         \n"
+    "                                          @@@@  @@@@@ @@@   @@@@ @@@@   @@@ @@@@   @@@  @@    @@@ @@    @@@  %%%%%  %%%   %%%%%%                                          \n"
+    "                                           @@@@@@@@@@ @@@@@@@@@   @@@@@@@@@  @@@@@@@@@ @@@@@@@@@@@@@@@@@@@@  %%%%%  %%%   %%%%%%                                          \n"
+    "                                            @@@@@@@@@  @@@@@@@    @@@@@@@@    @@@@@@@   @@@@@@@@  @@@@@@@@    %%%%%%%%%%%%%%%%%                                           \n"
+    "                                              @@@  @     @@@        @@@        @@@@       @@@@      @@@@       %%%%%%%%%%%%%%%%                                           \n"
+    "                                                                                                                %%%%%%%%%%%%%%                                            \n"
+    "                                                                                                                 %%%%%%%%%%%%                                             \n"
+    "                                                                                                                  %%%%%%%%%                                               "
+)
+CURRENT_YEAR = time.strftime("%Y")
+BANNER_TEXT = f"{ASCII_LOGO}\n\n"
+
+STDOUT_IS_TTY = sys.stdout.isatty()
+
+
+def clear_terminal() -> None:
+    if not STDOUT_IS_TTY:
+        return
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+
+
+
+def print_banner(*, flush: bool = True) -> None:
+    print(BANNER_TEXT, end="", flush=flush)
+
+
+
+def refresh_progress_display(progress_line: str) -> None:
+    if not STDOUT_IS_TTY:
+        print(progress_line, flush=True)
+        return
+    clear_terminal()
+    print_banner(flush=False)
+    print()
+    print(progress_line, flush=True)
+
+
 STRUCTURED_RESPONSE_FORMAT = {
     "type": "json_schema",
-    "json_schema": {
-        "name": "module_description_rewrite",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "rewritten_html": {
-                    "type": "string",
-                    "description": "Version reformulée du contenu HTML d'origine.",
-                }
-            },
-            "required": ["rewritten_html"],
-            "additionalProperties": False,
+    "name": "module_description_rewrite",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "rewritten_html": {
+                "type": "string",
+                "description": "Version reformulee du contenu HTML d'origine.",
+            }
         },
+        "required": ["rewritten_html"],
+        "additionalProperties": False,
     },
+    "strict": True,
 }
 USE_RESPONSE_FORMAT = True
 RESPONSE_FORMAT_LOCK = threading.Lock()
@@ -208,7 +261,7 @@ def call_openai(
                 use_structured_output = USE_RESPONSE_FORMAT
             request_kwargs: Dict[str, Any] = {}
             if use_structured_output:
-                request_kwargs["response_format"] = STRUCTURED_RESPONSE_FORMAT
+                request_kwargs["text"] = {"format": STRUCTURED_RESPONSE_FORMAT}
 
             response = client.responses.create(
                 model=model,
@@ -238,14 +291,14 @@ def call_openai(
             message = str(err)
             if (
                 use_structured_output
-                and "response_format" in message
                 and "unexpected keyword argument" in message
+                and ("text" in message or "response_format" in message)
             ):
                 with RESPONSE_FORMAT_LOCK:
                     if USE_RESPONSE_FORMAT:
                         USE_RESPONSE_FORMAT = False
                         print(
-                            "[WARN] Le SDK OpenAI installé ne supporte pas 'response_format'. "
+                            "[WARN] Le SDK OpenAI installé ne supporte pas le parametre 'text.format'. "
                             "Bascule vers un mode JSON assisté."
                         )
                 continue
@@ -292,7 +345,7 @@ def reformulate_rows(
         return index, rewritten
 
     if total == 0:
-        print(render_progress(completed, total), flush=True)
+        refresh_progress_display(render_progress(completed, total))
         return
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -302,12 +355,12 @@ def reformulate_rows(
             futures.append(executor.submit(process, idx, original))
 
         pending = set(futures)
-        print(render_progress(completed, total), flush=True)
+        refresh_progress_display(render_progress(completed, total))
 
         while pending:
             done, pending = wait(pending, timeout=progress_interval, return_when=FIRST_COMPLETED)
             if not done:
-                print(render_progress(completed, total), flush=True)
+                refresh_progress_display(render_progress(completed, total))
                 continue
 
             for future in done:
@@ -315,11 +368,14 @@ def reformulate_rows(
                 rows[index][column] = rewritten_text
                 completed += 1
 
-            print(render_progress(completed, total), flush=True)
+            refresh_progress_display(render_progress(completed, total))
 
 
 def main() -> None:
     args = parse_args()
+
+    clear_terminal()
+    print_banner()
 
     input_path = args.input
     output_path = build_output_path(input_path, args.output)
