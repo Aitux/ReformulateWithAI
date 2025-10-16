@@ -16,9 +16,8 @@ Batch rewrite of HTML descriptions stored in a CSV file using the OpenAI API wit
 ## Prerequisites
 
 ### Local execution (outside Docker)
-- Python 3.10 or newer (3.11 recommended).
-- `pip` and optionally a virtual environment.
-- Python dependency: `openai>=1.55.0`.
+- Python 3.12 or newer (uv can download and manage it automatically).
+- [`uv`](https://docs.astral.sh/uv/) for dependency and virtual-env management.
 - OpenAI API access with the key stored in `OPENAI_API_KEY`.
 
 ### Docker and Docker Compose
@@ -36,27 +35,28 @@ git clone https://github.com/Aitux/ReformulateWithAI.git
 cd ReformulateWithAI
 ```
 
-### Local installation
-1. (Optional) Create and activate a virtual environment:
+### Local installation (uv)
+1. Ensure `uv` is installed (see [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/)).
+2. From the `reformulator/` directory (where `pyproject.toml` lives), sync dependencies (this creates `.venv/` pinned by `uv.lock`):
    ```bash
-   python -m venv .venv
-   # Windows
-   .\.venv\Scripts\activate
+   cd reformulator
+   uv sync
+   ```
+3. Optionally activate the virtual environment created by uv:
+   ```bash
+   # Windows PowerShell
+   .\.venv\Scripts\Activate.ps1
    # macOS / Linux
    source .venv/bin/activate
    ```
-2. Install dependencies:
-   ```bash
-   pip install --upgrade pip
-   pip install openai>=1.55.0
-   ```
+   Activation is not required when using `uv run`, but it can be handy for interactive sessions.
 
 ### Docker installation
 Docker Compose builds the image automatically. If you want to build up front:
 ```bash
 docker compose build
 ```
-This uses the included `Dockerfile` (Python 3.11 slim with `openai` preinstalled).
+The included `Dockerfile` now uses Python 3.12 slim and installs the locked dependencies with `uv`.
 
 ---
 
@@ -85,23 +85,26 @@ WORKERS=8
 ## Usage
 
 ### Local run
+Run the script from inside the `reformulator/` directory:
 ```bash
 export OPENAI_API_KEY=sk-...    # macOS / Linux
 setx OPENAI_API_KEY "sk-..."    # Windows PowerShell (persistent)
-python reformulate_moduledescription.py --input path/to/input.csv
+uv run python reformulate_moduledescription.py --input path/to/input.csv
 ```
 
 Common arguments:
 ```bash
-python reformulate_moduledescription.py --input input.csv \
+uv run python reformulate_moduledescription.py --input input.csv \
     --output rewritten.csv \
     --column moduledescription \
     --model gpt-4.1-mini \
     --workers 8 \
     --max-retries 6 \
+    --limit-rows 10 \
     --dry-run
 ```
 - `--dry-run` copies the CSV without calling the API.
+- `--limit-rows` processes only the first *N* rows (handy to validate prompts/models on a cheap sample).
 
 ### Docker Compose run
 1. Optionally create a `.env` file in the repo root.
@@ -130,11 +133,16 @@ Service `reformulator` mounts the project at `/workspace`, injects `OPENAI_API_K
 ## Project structure
 ```
 ReformulateWithAI/
-|-- reformulate_moduledescription.py   # Main script
-|-- Dockerfile                         # Python 3.11 slim image with openai
+|-- reformulator/
+|   |-- pyproject.toml                 # Project metadata (managed by uv)
+|   |-- uv.lock                        # Locked dependency graph
+|   |-- .python-version                # Default interpreter for uv / pyenv
+|   |-- reformulate_moduledescription.py   # Main script
+|   |-- README.md                      # Documentation (this file)
+|   |-- main.py                        # Placeholder entry point for demos
+|   |-- gesform_export_formation_prod_20250925.csv (example input, local only)
+|-- Dockerfile                         # Python 3.12 slim image installing deps with uv
 |-- docker-compose.yml                 # Compose service definition
-|-- README.md                          # Documentation
-|-- gesform_export_formation_prod_20250925.csv (example input, local only)
 ```
 
 ---
@@ -160,8 +168,7 @@ Open an issue to discuss new ideas (batch modes, additional CSV formats, advance
 ---
 
 ## License
-License pending. Choose and add a license file (MIT, Apache-2.0, etc.) before final publication.
-
+MIT
 ---
 
 ## Acknowledgements

@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "openai>=1.55.0",
+# ]
+# ///
 """Reformulates the moduledescription column of a CSV file using the OpenAI API.
 
 Usage example:
@@ -16,7 +22,7 @@ import os
 import sys
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -105,6 +111,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=5,
         help="Nombre maximum de tentatives par appel d'API en cas d'erreur transitoire.",
+    )
+    parser.add_argument(
+        "--limit-rows",
+        "-n",
+        type=int,
+        help="Limite le traitement aux N premières lignes du CSV (teste l'API sur un petit échantillon).",
     )
     parser.add_argument(
         "--dry-run",
@@ -257,10 +269,9 @@ def reformulate_rows(
     max_retries: int,
     dry_run: bool = False,
 ) -> None:
-    lock = threading.Lock()
     total = len(rows)
     completed = 0
-    stop_event = threading.Event()
+    progress_interval = 1.0
 
     def render_progress(current: int, maximum: int) -> str:
         if maximum <= 0:
@@ -272,19 +283,6 @@ def reformulate_rows(
         percent = ratio * 100
         return f"[PROGRESS] |{bar}| {percent:6.2f}% ({current}/{maximum})"
 
-    def progress_worker() -> None:
-        if total > 0:
-            with lock:
-                current = completed
-            print(render_progress(current, total), flush=True)
-        while not stop_event.wait(3):
-            with lock:
-                current = completed
-            print(render_progress(current, total), flush=True)
-        with lock:
-            current = completed
-        print(render_progress(current, total), flush=True)
-
     def process(index: int, text: str) -> Tuple[int, str]:
         if dry_run or not text.strip():
             return index, text
@@ -293,24 +291,31 @@ def reformulate_rows(
         rewritten = call_openai(client, model, text, max_retries=max_retries)
         return index, rewritten
 
+    if total == 0:
+        print(render_progress(completed, total), flush=True)
+        return
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures: List[Future[Tuple[int, str]]] = []
         for idx, row in enumerate(rows):
             original = row.get(column, "")
             futures.append(executor.submit(process, idx, original))
 
-        progress_thread = threading.Thread(target=progress_worker, daemon=True)
-        progress_thread.start()
+        pending = set(futures)
+        print(render_progress(completed, total), flush=True)
 
-        try:
-            for future in as_completed(futures):
+        while pending:
+            done, pending = wait(pending, timeout=progress_interval, return_when=FIRST_COMPLETED)
+            if not done:
+                print(render_progress(completed, total), flush=True)
+                continue
+
+            for future in done:
                 index, rewritten_text = future.result()
                 rows[index][column] = rewritten_text
-                with lock:
-                    completed += 1
-        finally:
-            stop_event.set()
-            progress_thread.join()
+                completed += 1
+
+            print(render_progress(completed, total), flush=True)
 
 
 def main() -> None:
@@ -323,10 +328,17 @@ def main() -> None:
         raise FileNotFoundError(f"Fichier introuvable: {input_path}")
 
     rows, headers = load_rows(input_path)
+    total_rows = len(rows)
     if args.column not in headers:
         raise ValueError(
             f"La colonne '{args.column}' n'existe pas dans le fichier. Colonnes disponibles: {', '.join(headers)}"
         )
+    if args.limit_rows is not None:
+        if args.limit_rows < 1:
+            raise ValueError("--limit-rows doit être supérieur ou égal à 1.")
+        if args.limit_rows < total_rows:
+            rows = rows[: args.limit_rows]
+        print(f"[INFO] Limite active: {len(rows)} premières lignes traitées (sur {total_rows}).")
 
     print(f"[INFO] {len(rows)} lignes chargées depuis {input_path}.")
     print(f"[INFO] Colonne ciblée: {args.column}")

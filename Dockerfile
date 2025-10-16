@@ -1,12 +1,21 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /app
+WORKDIR /workspace
 
-COPY reformulate_moduledescription.py /app/
+RUN pip install --no-cache-dir uv
 
-RUN pip install --no-cache-dir "openai>=1.55.0"
+COPY reformulator/pyproject.toml /tmp/project/pyproject.toml
+COPY reformulator/uv.lock /tmp/project/uv.lock
 
-ENTRYPOINT ["python", "reformulate_moduledescription.py"]
+RUN uv pip install \
+        --system \
+        --break-system-packages \
+        --no-cache \
+        -r /tmp/project/uv.lock
+
+COPY reformulator/reformulate_moduledescription.py /workspace/reformulator/
+
+ENTRYPOINT ["python", "reformulator/reformulate_moduledescription.py"]
