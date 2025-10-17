@@ -59,6 +59,8 @@ ASCII_LOGO = (
 )
 CURRENT_YEAR = time.strftime("%Y")
 BANNER_TEXT = f"{ASCII_LOGO}\n\n"
+ASCII_LOGO_LINES = ASCII_LOGO.splitlines()
+ASCII_LOGO_TOTAL_CHARS = sum(len(line) for line in ASCII_LOGO_LINES)
 
 STDOUT_IS_TTY = sys.stdout.isatty()
 
@@ -79,13 +81,36 @@ def print_banner(*, flush: bool = True) -> None:
 
 
 
+def build_logo_progress(ratio: float) -> str:
+    """Return an ASCII logo partially revealed according to the provided ratio."""
+    if ASCII_LOGO_TOTAL_CHARS <= 0 or not ASCII_LOGO_LINES:
+        return ""
+    clamped_ratio = max(0.0, min(1.0, ratio))
+    visible_chars = int(ASCII_LOGO_TOTAL_CHARS * clamped_ratio)
+    if clamped_ratio > 0.0 and visible_chars == 0:
+        visible_chars = 1
+    visible_chars = min(ASCII_LOGO_TOTAL_CHARS, visible_chars)
+    remaining = visible_chars
+    rendered_lines: List[str] = []
+    for line in ASCII_LOGO_LINES:
+        line_length = len(line)
+        if remaining <= 0:
+            rendered_lines.append(" " * line_length)
+            continue
+        if remaining >= line_length:
+            rendered_lines.append(line)
+            remaining -= line_length
+            continue
+        rendered_lines.append(line[:remaining] + " " * (line_length - remaining))
+        remaining = 0
+    return "\n".join(rendered_lines)
+
+
 def refresh_progress_display(progress_line: str) -> None:
     if not STDOUT_IS_TTY:
         print(progress_line, flush=True)
         return
     clear_terminal()
-    print_banner(flush=False)
-    print()
     print(progress_line, flush=True)
 
 
@@ -327,14 +352,13 @@ def reformulate_rows(
     progress_interval = 1.0
 
     def render_progress(current: int, maximum: int) -> str:
-        if maximum <= 0:
-            return "[PROGRESS] |##############################| 100.00% (0/0)"
-        ratio = max(0.0, min(1.0, current / maximum))
-        bar_length = 30
-        filled = int(bar_length * ratio)
-        bar = "#" * filled + "-" * (bar_length - filled)
+        ratio = 1.0 if maximum <= 0 else max(0.0, min(1.0, current / maximum))
         percent = ratio * 100
-        return f"[PROGRESS] |{bar}| {percent:6.2f}% ({current}/{maximum})"
+        logo_block = build_logo_progress(ratio)
+        progress_text = f"[PROGRESS] {percent:6.2f}% ({current}/{maximum})"
+        if not logo_block:
+            return progress_text
+        return f"{logo_block}\n{progress_text}"
 
     def process(index: int, text: str) -> Tuple[int, str]:
         if dry_run or not text.strip():

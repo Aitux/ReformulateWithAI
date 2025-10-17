@@ -137,12 +137,12 @@ ReformulateWithAI/
 |   |-- pyproject.toml                 # Project metadata (managed by uv)
 |   |-- uv.lock                        # Locked dependency graph
 |   |-- .python-version                # Default interpreter for uv / pyenv
-|   |-- reformulate_moduledescription.py   # Main script
-|   |-- README.md                      # Documentation (this file)
 |   |-- main.py                        # Placeholder entry point for demos
-|   |-- gesform_export_formation_prod_20250925.csv (example input, local only)
+|   |-- reformulate.py                        # Placeholder entry point for demos
 |-- Dockerfile                         # Python 3.12 slim image installing deps with uv
 |-- docker-compose.yml                 # Compose service definition
+|-- README.md                          # Documentation (this file)
+
 ```
 
 ---
