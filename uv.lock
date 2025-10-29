@@ -250,7 +250,7 @@ wheels = [
 [[package]]
 name = "reformulator"
 version = "1.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "openai" },
 ]

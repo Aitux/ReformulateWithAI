@@ -1,9 +1,0 @@
-[project]
-name = "reformulator"
-version = "1.0.0"
-description = "Script to help reformulate column in CSV without touching anything else."
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "openai>=1.55.0",
-]

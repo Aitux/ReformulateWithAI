@@ -1,0 +1,16 @@
+[project]
+name = "reformulator"
+version = "1.0.0"
+description = "Outil CLI pour reformuler une colonne CSV via l'API OpenAI."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.55.0",
+]
+
+[project.scripts]
+reformulator = "reformulator.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"

@@ -16,7 +16,7 @@ services:
       - --column
       - ${COLUMN_NAME:-moduledescription}
       - --model
-      - ${MODEL:-gpt-4.1-mini}
+      - ${MODEL:-gpt-5-chat-latest}
       - --workers
       - ${WORKERS:-5}
       - --max-retries

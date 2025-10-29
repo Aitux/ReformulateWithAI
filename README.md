@@ -37,9 +37,8 @@ cd ReformulateWithAI
 
 ### Local installation (uv)
 1. Ensure `uv` is installed (see [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/)).
-2. From the `reformulator/` directory (where `pyproject.toml` lives), sync dependencies (this creates `.venv/` pinned by `uv.lock`):
+2. From the repository root (where `pyproject.toml` lives), sync dependencies (this creates `.venv/` pinned by `uv.lock`):
    ```bash
-   cd reformulator
    uv sync
    ```
 3. Optionally activate the virtual environment created by uv:
@@ -67,7 +66,7 @@ The included `Dockerfile` now uses Python 3.12 slim and installs the locked depe
 - `INPUT_CSV` (optional): CSV input path (default `/workspace/gesform_export_formation_prod_20250925.csv` in Docker, or the value passed to `--input` locally).
 - `OUTPUT_CSV` (optional): CSV output path (default appends `_rewritten`).
 - `COLUMN_NAME` (optional): Column to rewrite (`moduledescription` by default).
-- `MODEL` (optional): OpenAI model (`gpt-4.1-mini` by default).
+- `MODEL` (optional): OpenAI model (`gpt-5-chat-latest` by default).
 - `WORKERS` (optional): Number of worker threads (default 5).
 - `MAX_RETRIES` (optional): Maximum retry attempts per request (default 5).
 
@@ -85,19 +84,19 @@ WORKERS=8
 ## Usage
 
 ### Local run
-Run the script from inside the `reformulator/` directory:
+Run the CLI from the repository root:
 ```bash
 export OPENAI_API_KEY=sk-...    # macOS / Linux
 setx OPENAI_API_KEY "sk-..."    # Windows PowerShell (persistent)
-uv run python reformulate_moduledescription.py --input path/to/input.csv
+uv run reformulator --input path/to/input.csv
 ```
 
 Common arguments:
 ```bash
-uv run python reformulate_moduledescription.py --input input.csv \
+uv run reformulator --input input.csv \
     --output rewritten.csv \
     --column moduledescription \
-    --model gpt-4.1-mini \
+    --model gpt-5-chat-latest \
     --workers 8 \
     --max-retries 6 \
     --limit-rows 10 \
@@ -131,7 +130,7 @@ Service `reformulator` mounts the project at `/workspace`, injects `OPENAI_API_K
 ### Interactive mode
 Launch a guided setup when you prefer to supply parameters step by step:
 ```bash
-uv run python reformulate_moduledescription.py --interactive
+uv run reformulator --interactive
 ```
 The wizard clears the screen between questions, reprints the ASCII banner, and uses colored cues so you can distinguish context (cyan) from actionable prompts (yellow). It masks your existing `OPENAI_API_KEY`, validates file paths, and walks you through column, model, workers, retry policy, optional row limits, and the dry-run toggle before summarizing the run.
 
@@ -141,15 +140,21 @@ The wizard clears the screen between questions, reprints the ASCII banner, and u
 ```
 ReformulateWithAI/
 |-- reformulator/
-|   |-- pyproject.toml                 # Project metadata (managed by uv)
-|   |-- uv.lock                        # Locked dependency graph
-|   |-- .python-version                # Default interpreter for uv / pyenv
-|   |-- main.py                        # Placeholder entry point for demos
-|   |-- reformulate.py                        # Placeholder entry point for demos
+|   |-- __init__.py
+|   |-- __main__.py              # permet `python -m reformulator`
+|   |-- cli.py                   # argparse + assistant interactif
+|   |-- config.py                # modèles de configuration + valeurs par défaut
+|   |-- core.py                  # orchestration principale
+|   |-- io_csv.py                # lecture/écriture CSV + détection délimiteur
+|   |-- logging_conf.py          # configuration logging
+|   |-- openai_client.py         # client OpenAI + parsing de réponse
+|   |-- progress.py              # affichage ASCII & progression
 |-- Dockerfile                         # Python 3.12 slim image installing deps with uv
 |-- docker-compose.yml                 # Compose service definition
+|-- pyproject.toml                     # Dépendances + console_scripts
 |-- README.md                          # Documentation (this file)
-
+|-- tests/                             # Suite de tests unitaires
+|-- uv.lock                            # Dépendances verrouillées pour uv
 ```
 
 ---
