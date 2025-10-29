@@ -25,7 +25,7 @@ STRUCTURED_RESPONSE_FORMAT: Dict[str, Any] = {
         "properties": {
             "rewritten_html": {
                 "type": "string",
-                "description": "Version reformulee du contenu HTML d'origine.",
+                "description": "Version traduite du contenu HTML d'origine, balises conservées.",
             }
         },
         "required": ["rewritten_html"],
@@ -62,11 +62,12 @@ def create_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def make_prompt(content: str) -> str:
+def make_prompt(content: str, target_language: str) -> str:
     """Build the user prompt for the API call."""
     return (
-        "Réécris le texte HTML suivant en français en conservant toutes les balises et le sens global. "
-        "Varie la formulation pour éviter le contenu dupliqué, mais ne supprime aucune information utile.\n\n"
+        f"Traduire le contenu HTML suivant en {target_language} en conservant exactement les balises et la structure. "
+        "Ne modifie pas les identifiants ou attributs, uniquement le texte visible. "
+        "Préserve le sens, les formats de nombres et les balises existantes.\n\n"
         f"Texte d'origine:\n{content}"
     )
 
@@ -103,6 +104,7 @@ def call_openai(
     model: str,
     content: str,
     *,
+    target_language: str,
     max_retries: int = 5,
     backoff_base: float = 2.0,
 ) -> str:
@@ -127,16 +129,22 @@ def call_openai(
                             {
                                 "type": "input_text",
                                 "text": (
-                                    "Tu es un assistant qui reformule du contenu HTML en français. "
-                                    "Tu conserves toutes les balises et la structure, tout en modifiant "
-                                    "les phrases pour éviter le contenu dupliqué. "
-                                    "Respecte strictement le format de sortie JSON contenant une seule "
-                                    "clé 'rewritten_html'."
+                                    "Tu es un assistant qui traduit du contenu HTML en conservant strictement "
+                                    "toutes les balises et attributs. "
+                                    "Attention, parfois la langue cible peut être la même que la langue source. "
+                                    "Dans ce cas, tu dois reformuler le texte sans modifier la langue et sans changer le sens de ce qui est dit."
+                                    "Tu livres la réponse dans le même HTML avec le texte traduit, et tu respectes "
+                                    "le format JSON avec une clé unique 'rewritten_html'."
                                 ),
                             }
                         ],
                     },
-                    {"role": "user", "content": [{"type": "input_text", "text": make_prompt(content)}]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": make_prompt(content, target_language)}
+                        ],
+                    },
                 ],
                 **request_kwargs,
             )

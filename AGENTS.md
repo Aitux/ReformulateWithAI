@@ -13,6 +13,13 @@ Source code lives in `reformulator/`, now split across dedicated modules (`cli.p
 ## Coding Style & Naming Conventions
 Follow PEP 8 with four-space indentation and grouped imports. Continue using type hints and explicit `Optional`/`Tuple` usage. Module constants stay uppercase (`DEFAULT_MODEL`, `ASCII_LOGO`), functions remain snake_case, and CLI flags should mirror argument names. Extend argparse help strings and keep progress output human readable because the script often runs unattended.
 
+## Python Implementation Guidelines
+- **Naming**: Default to PEP 8 naming; choose verbs for functions (`rewrite_batch`), nouns for classes (`BatchRunner`), and reserve caps for module constants. Treat private helpers as internal (`_derive_prompt`) so the module surface stays intentional.
+- **Structure**: Keep modules import-safe—no network calls, file writes, or log spam at import time. Split logic into focused files and wire them together via `__init__.py` exports only when the public API needs it. Prefer dependency injection over globals so threaded workers stay testable.
+- **Comments & Docstrings**: Use PEP 257 single-line summaries plus context on *why* the code exists; skip restating the signature. Let type hints carry type info and only mention edge cases or invariants the function enforces.
+- **Tests**: Use pytest `test_*` functions with descriptive names (`test_merges_partial_batches`). Keep coverage high by isolating side effects behind mocks/fakes, especially for OpenAI and filesystem calls. Ensure tests stay deterministic—freeze time, seed RNGs, and avoid wall-clock sleeps.
+- **Tooling**: Run `black`, `ruff`, and `isort` together via pre-commit so style stays automated; fail the hook instead of fixing by hand. Gate merges with `mypy` to ensure type hints are trusted, not decorative.
+
 ## Testing Guidelines
 Run the unit suite with `python -m unittest discover -s tests -p 'test_*.py'`; it covers CSV round-trips, OpenAI stubs, threaded processing, and the interactive wizard. Use `--dry-run` plus `--limit-rows 10` for sanity checks against real CSVs, and add targeted tests under `tests/` for new helpers before expanding CI.
 

@@ -75,12 +75,20 @@ class CallOpenAITests(unittest.TestCase):
         previous = module.USE_RESPONSE_FORMAT
         try:
             module.USE_RESPONSE_FORMAT = True
-            result = module.call_openai(client, "gpt-test", "<p>Source</p>", max_retries=1)
+            result = module.call_openai(
+                client,
+                "gpt-test",
+                "<p>Source</p>",
+                target_language="anglais",
+                max_retries=1,
+            )
         finally:
             module.USE_RESPONSE_FORMAT = previous
         self.assertEqual(result, "<p>Réécrit</p>")
         self.assertEqual(client.responses.calls[0]["model"], "gpt-test")
         self.assertIn("input", client.responses.calls[0])
+        user_payload = client.responses.calls[0]["input"][1]["content"][0]["text"]
+        self.assertIn("anglais", user_payload)
 
 
 class CreateClientTests(unittest.TestCase):

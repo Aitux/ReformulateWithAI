@@ -70,6 +70,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help=f"Nombre maximum de tentatives par appel d'API (défaut: {DEFAULTS.max_retries}).",
     )
     parser.add_argument(
+        "--target-language",
+        "-t",
+        default=DEFAULTS.target_language,
+        help=(
+            "Langue cible pour la traduction tout en conservant le HTML (défaut: "
+            f"{DEFAULTS.target_language})."
+        ),
+    )
+    parser.add_argument(
         "--limit-rows",
         "-n",
         type=int,
@@ -255,6 +264,16 @@ def _interactive_configure(args: argparse.Namespace) -> RunConfig:
         entered = input(style_action(f"Modèle OpenAI [{fallback}]: ")).strip()
         return entered or fallback
 
+    def ask_target_language(default: Optional[str]) -> str:
+        fallback = default or DEFAULTS.target_language
+        context_lines = [
+            "Définissez la langue cible pour la traduction tout en conservant les balises HTML.",
+            f"Valeur par défaut: {fallback}",
+        ]
+        render_step(context_lines)
+        entered = input(style_action(f"Langue cible [{fallback}]: ")).strip()
+        return entered or fallback
+
     def ask_workers(default: int) -> int:
         error: Optional[str] = None
         while True:
@@ -331,6 +350,7 @@ def _interactive_configure(args: argparse.Namespace) -> RunConfig:
     input_path = ask_input_path(args.input)
     output_path = ask_output_path(input_path, args.output)
     column = ask_column(args.column)
+    target_language = ask_target_language(args.target_language)
     model = ask_model(args.model)
     workers = ask_workers(args.workers or DEFAULTS.workers)
     max_retries = ask_max_retries(args.max_retries or DEFAULTS.max_retries)
@@ -341,6 +361,7 @@ def _interactive_configure(args: argparse.Namespace) -> RunConfig:
         f"Fichier d'entrée : {input_path}",
         f"Fichier de sortie : {output_path}",
         f"Colonne : {column}",
+        f"Langue cible : {target_language}",
         f"Modèle : {model}",
         f"Workers : {workers}",
         f"Max retries : {max_retries}",
@@ -360,6 +381,7 @@ def _interactive_configure(args: argparse.Namespace) -> RunConfig:
         max_retries=max_retries,
         limit_rows=limit_rows,
         dry_run=dry_run,
+        target_language=target_language,
     )
 
 
@@ -378,6 +400,7 @@ def args_to_config(args: argparse.Namespace) -> RunConfig:
         limit_rows=args.limit_rows,
         dry_run=args.dry_run,
         delimiter=args.delimiter,
+        target_language=args.target_language,
     )
 
 
