@@ -131,6 +131,8 @@ def call_openai(
                                 "text": (
                                     "Tu es un assistant qui traduit du contenu HTML en conservant strictement "
                                     "toutes les balises et attributs. "
+                                    "Attention, parfois la langue cible peut être la même que la langue source. "
+                                    "Dans ce cas, tu dois reformuler le texte sans modifier la langue et sans changer le sens de ce qui est dit."
                                     "Tu livres la réponse dans le même HTML avec le texte traduit, et tu respectes "
                                     "le format JSON avec une clé unique 'rewritten_html'."
                                 ),
