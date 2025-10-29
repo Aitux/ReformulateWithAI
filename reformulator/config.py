@@ -12,6 +12,7 @@ DEFAULT_MAX_RETRIES = 5
 DEFAULT_COLUMN = "moduledescription"
 DEFAULT_DELIMITER = ";"
 DEFAULT_REFRESH_INTERVAL = 1.0
+DEFAULT_TARGET_LANGUAGE = "français"
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 
 
@@ -25,6 +26,7 @@ class DefaultsConfig:
     max_retries: int = DEFAULT_MAX_RETRIES
     delimiter: str = DEFAULT_DELIMITER
     dry_run: bool = False
+    target_language: str = DEFAULT_TARGET_LANGUAGE
 
 
 @dataclass(slots=True)
@@ -40,6 +42,7 @@ class RunConfig:
     limit_rows: Optional[int] = None
     dry_run: bool = False
     delimiter: Optional[str] = None
+    target_language: str = DEFAULT_TARGET_LANGUAGE
 
 
 DEFAULTS = DefaultsConfig()
@@ -53,6 +56,7 @@ __all__ = [
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_MODEL",
     "DEFAULT_REFRESH_INTERVAL",
+    "DEFAULT_TARGET_LANGUAGE",
     "DEFAULT_WORKERS",
     "OPENAI_API_KEY_ENV",
     "RunConfig",

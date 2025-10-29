@@ -21,6 +21,7 @@ def reformulate_rows(
     column: str,
     client: Optional[OpenAI],
     model: str,
+    target_language: str,
     workers: int,
     max_retries: int,
     dry_run: bool = False,
@@ -44,7 +45,13 @@ def reformulate_rows(
             return index, text
         if client is None:
             raise RuntimeError("Client OpenAI non initialisé.")
-        rewritten = call_openai(client, model, text, max_retries=max_retries)
+        rewritten = call_openai(
+            client,
+            model,
+            text,
+            target_language=target_language,
+            max_retries=max_retries,
+        )
         return index, rewritten
 
     if total == 0:
@@ -80,6 +87,7 @@ def run_with_args(
     output_path: Optional[str],
     column: str,
     model: str,
+    target_language: str,
     workers: int,
     max_retries: int,
     limit_rows: Optional[int],
@@ -93,6 +101,7 @@ def run_with_args(
             output_path=build_output_path(input_path, output_path),
             column=column,
             model=model,
+            target_language=target_language,
             workers=workers,
             max_retries=max_retries,
             limit_rows=limit_rows,
@@ -133,6 +142,7 @@ def run(config: RunConfig) -> None:
 
     LOGGER.info("[INFO] %s lignes chargées depuis %s.", len(target_rows), config.input_path)
     LOGGER.info("[INFO] Colonne ciblée: %s", config.column)
+    LOGGER.info("[INFO] Langue cible: %s", config.target_language)
     if config.dry_run:
         LOGGER.info("[INFO] Mode dry-run activé: aucun appel API ne sera effectué.")
 
@@ -144,6 +154,7 @@ def run(config: RunConfig) -> None:
             column=config.column,
             client=client,
             model=config.model,
+            target_language=config.target_language,
             workers=max(1, config.workers),
             max_retries=config.max_retries,
             dry_run=config.dry_run,

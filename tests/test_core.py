@@ -31,7 +31,11 @@ class ReformulateRowsTests(unittest.TestCase):
             {"moduledescription": "<p>Alpha</p>"},
             {"moduledescription": "<p>Beta</p>"},
         ]
-        with patch("reformulator.core.call_openai", side_effect=lambda client, model, text, max_retries: f"{text}-rewritten") as mocked_call, patch(
+        def fake_call(client, model, text, *, target_language, max_retries):
+            self.assertEqual(target_language, "anglais")
+            return f"{text}-rewritten"
+
+        with patch("reformulator.core.call_openai", side_effect=fake_call) as mocked_call, patch(
             "reformulator.core.refresh_progress_display", new=MagicMock()
         ), patch(
             "reformulator.core.build_logo_progress", return_value=""
@@ -41,6 +45,7 @@ class ReformulateRowsTests(unittest.TestCase):
                 column="moduledescription",
                 client=object(),
                 model="gpt",
+                target_language="anglais",
                 workers=2,
                 max_retries=1,
                 dry_run=False,
@@ -60,6 +65,7 @@ class ReformulateRowsTests(unittest.TestCase):
                 column="moduledescription",
                 client=None,
                 model="gpt",
+                target_language="français",
                 workers=2,
                 max_retries=1,
                 dry_run=True,
