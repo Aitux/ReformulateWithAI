@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import getpass
 import json
 import os
 import sys
@@ -30,6 +31,13 @@ try:
     from openai import OpenAI
 except ImportError as exc:  # pragma: no cover - handled at runtime
     raise SystemExit("Le paquet 'openai' est requis. Installez-le avec 'pip install openai'.") from exc
+
+try:  # pragma: no cover - optional dependency
+    from colorama import Fore, Style, init as colorama_init
+except ImportError:  # pragma: no cover - optional dependency
+    colorama_init = None
+    Fore = None
+    Style = None
 
 
 DEFAULT_MODEL = "gpt-5-chat-latest"
@@ -155,9 +163,13 @@ def parse_args() -> argparse.Namespace:
         description="Réécrit la colonne moduledescription d'un CSV via l'API OpenAI en parallèle."
     )
     parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Lance un assistant interactif pour configurer l'exécution.",
+    )
+    parser.add_argument(
         "--input",
         "-i",
-        required=True,
         help="Chemin vers le fichier CSV source.",
     )
     parser.add_argument(
@@ -227,6 +239,286 @@ def save_rows(path: str, headers: List[str], rows: List[Dict[str, str]], delimit
         writer = csv.DictWriter(csvfile, fieldnames=headers, delimiter=delimiter, quotechar='"')
         writer.writeheader()
         writer.writerows(rows)
+
+
+def mask_api_key(api_key: Optional[str]) -> str:
+    if not api_key:
+        return ""
+    trimmed = api_key.strip()
+    if not trimmed:
+        return ""
+    if len(trimmed) <= 4:
+        return "*" * len(trimmed)
+    if len(trimmed) <= 8:
+        return trimmed[0] + "*" * (len(trimmed) - 2) + trimmed[-1]
+    return f"{trimmed[:4]}...{trimmed[-2:]}"
+
+
+def interactive_configure(args: argparse.Namespace) -> argparse.Namespace:
+    current_key = os.getenv("OPENAI_API_KEY")
+
+    if STDOUT_IS_TTY:
+        if colorama_init and Fore is not None and Style is not None:
+            colorama_init()
+            color_reset = Style.RESET_ALL
+            color_context = Fore.CYAN
+            color_action = Fore.YELLOW
+            color_error = Fore.RED
+            color_success = Fore.GREEN
+        else:
+            color_reset = "\033[0m"
+            color_context = "\033[36m"
+            color_action = "\033[33m"
+            color_error = "\033[31m"
+            color_success = "\033[32m"
+    else:
+        color_reset = ""
+        color_context = ""
+        color_action = ""
+        color_error = ""
+        color_success = ""
+
+    def colorize(text: str, color: str) -> str:
+        if not color:
+            return text
+        return f"{color}{text}{color_reset}"
+
+    def style_context(text: str) -> str:
+        return colorize(text, color_context)
+
+    def style_action(text: str) -> str:
+        return colorize(text, color_action)
+
+    def style_error(text: str) -> str:
+        return colorize(text, color_error)
+
+    def style_success(text: str) -> str:
+        return colorize(text, color_success)
+
+    def render_step(context_lines: List[str], error: Optional[str] = None) -> None:
+        clear_terminal()
+        print_banner()
+        for line in context_lines:
+            if line:
+                print(style_context(line))
+        if error:
+            print(style_error(error))
+        print()
+
+    def render_summary(lines: List[str], error: Optional[str] = None) -> None:
+        clear_terminal()
+        print_banner()
+        print(style_success("Récapitulatif de l'exécution:"))
+        for line in lines:
+            print(style_context(f"  - {line}"))
+        if error:
+            print(style_error(error))
+        print()
+
+    def ask_api_key(initial_key: Optional[str]) -> str:
+        error: Optional[str] = None
+        current = initial_key
+        while True:
+            context_lines = [
+                "Configurez la clé OpenAI utilisée pour authentifier les requêtes.",
+                f"Clé détectée: {mask_api_key(current) or 'Aucune'}",
+            ]
+            render_step(context_lines, error)
+            prompt = "OPENAI_API_KEY (laisser vide pour conserver): "
+            entered = getpass.getpass(style_action(prompt)).strip()
+            if entered:
+                os.environ["OPENAI_API_KEY"] = entered
+                return entered
+            if current:
+                return current
+            error = "Une clé API est requise pour poursuivre."
+
+    def ask_input_path(default: Optional[str]) -> str:
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Sélectionnez le fichier CSV d'entrée contenant la colonne à reformuler.",
+                f"Valeur par défaut: {default}" if default else "Aucun chemin par défaut détecté.",
+            ]
+            render_step(context_lines, error)
+            suffix = f" [{default}]" if default else ""
+            entered = input(style_action(f"Chemin du CSV d'entrée{suffix}: ")).strip()
+            candidate = entered or (default or "")
+            if not candidate:
+                error = "Un chemin de fichier est requis."
+                continue
+            if os.path.isfile(candidate):
+                return candidate
+            error = f"Fichier introuvable: {candidate}"
+
+    def ask_output_path(input_path: str, provided_output: Optional[str]) -> str:
+        default = provided_output or build_output_path(input_path, None)
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Indiquez le fichier de sortie qui recevra les descriptions reformulées.",
+                f"Chemin suggéré: {default}",
+            ]
+            render_step(context_lines, error)
+            suffix = f" [{default}]" if default else ""
+            entered = input(style_action(f"Chemin du CSV de sortie{suffix}: ")).strip()
+            candidate = entered or default
+            if not candidate:
+                error = "Un chemin de sortie est requis."
+                continue
+            parent = os.path.dirname(candidate) or "."
+            if os.path.isdir(parent):
+                return candidate
+            error = f"Répertoire introuvable: {parent}"
+
+    def ask_column(default: Optional[str]) -> str:
+        fallback = default or "moduledescription"
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Saisissez le nom exact de la colonne à reformuler.",
+                f"Valeur par défaut: {fallback}",
+            ]
+            render_step(context_lines, error)
+            entered = input(style_action(f"Colonne à reformuler [{fallback}]: ")).strip()
+            if entered:
+                return entered
+            if fallback:
+                return fallback
+            error = "Veuillez fournir le nom d'une colonne."
+
+    def ask_model(default: Optional[str]) -> str:
+        fallback = default or DEFAULT_MODEL
+        context_lines = [
+            "Choisissez le modèle OpenAI utilisé pour les réécritures.",
+            f"Valeur par défaut: {fallback}",
+        ]
+        render_step(context_lines)
+        entered = input(style_action(f"Modèle OpenAI [{fallback}]: ")).strip()
+        return entered or fallback
+
+    def ask_workers(default: int) -> int:
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Définissez le nombre de workers pour paralléliser les appels.",
+                f"Valeur par défaut: {default}",
+            ]
+            render_step(context_lines, error)
+            entered = input(style_action(f"Nombre de workers [{default}]: ")).strip()
+            if not entered:
+                return default
+            try:
+                value = int(entered)
+            except ValueError:
+                error = "Veuillez entrer un entier."
+                continue
+            if value < 1:
+                error = "Veuillez entrer un entier supérieur ou égal à 1."
+                continue
+            return value
+
+    def ask_max_retries(default: int) -> int:
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Fixez le nombre maximum de tentatives en cas d'erreur transitoire.",
+                f"Valeur par défaut: {default}",
+            ]
+            render_step(context_lines, error)
+            entered = input(style_action(f"Nombre maximum de tentatives [{default}]: ")).strip()
+            if not entered:
+                return default
+            try:
+                value = int(entered)
+            except ValueError:
+                error = "Veuillez entrer un entier."
+                continue
+            if value < 0:
+                error = "Veuillez entrer un entier supérieur ou égal à 0."
+                continue
+            return value
+
+    def ask_limit_rows(default: Optional[int]) -> Optional[int]:
+        error: Optional[str] = None
+        default_label = str(default) if default is not None else "aucune"
+        while True:
+            context_lines = [
+                "Optionnel: limitez le nombre de lignes traitées pour les tests.",
+                f"Valeur par défaut: {default_label}",
+            ]
+            render_step(context_lines, error)
+            hint = f"[{default}]" if default is not None else "[laisser vide]"
+            entered = input(style_action(f"Limite de lignes {hint}: ")).strip()
+            if not entered:
+                return default
+            try:
+                value = int(entered)
+            except ValueError:
+                error = "Veuillez entrer un entier ou laisser vide."
+                continue
+            if value < 1:
+                error = "Veuillez entrer un entier supérieur ou égal à 1."
+                continue
+            return value
+
+    def ask_dry_run(default: bool) -> bool:
+        error: Optional[str] = None
+        while True:
+            context_lines = [
+                "Activez le mode dry-run pour vérifier le flux sans appeler l'API.",
+                f"Valeur actuelle: {'activé' if default else 'désactivé'}",
+            ]
+            render_step(context_lines, error)
+            hint = "Y/n" if default else "y/N"
+            choice = input(style_action(f"Activer le mode dry-run [{hint}]: ")).strip().lower()
+            if not choice:
+                return default
+            if choice in {"y", "yes", "o", "oui"}:
+                return True
+            if choice in {"n", "no", "non"}:
+                return False
+            error = "Répondez par 'y' ou 'n'."
+
+    def confirm_settings(lines: List[str]) -> bool:
+        error: Optional[str] = None
+        while True:
+            render_summary(lines, error)
+            choice = input(style_action("Lancer la reformulation ? [Y/n]: ")).strip().lower()
+            if not choice:
+                return True
+            if choice in {"y", "yes", "o", "oui"}:
+                return True
+            if choice in {"n", "no", "non"}:
+                return False
+            error = "Répondez par 'y' ou 'n'."
+
+    current_key = ask_api_key(current_key)
+    args.input = ask_input_path(args.input)
+    args.output = ask_output_path(args.input, args.output)
+    args.column = ask_column(args.column)
+    args.model = ask_model(args.model)
+    args.workers = ask_workers(args.workers or DEFAULT_WORKERS)
+    retries_default = args.max_retries if args.max_retries is not None else 5
+    args.max_retries = ask_max_retries(retries_default)
+    args.limit_rows = ask_limit_rows(args.limit_rows)
+    args.dry_run = ask_dry_run(args.dry_run)
+
+    summary_lines = [
+        f"Input CSV : {args.input}",
+        f"Output CSV : {args.output}",
+        f"Colonne : {args.column}",
+        f"Modèle : {args.model}",
+        f"Workers : {args.workers}",
+        f"Max retries : {args.max_retries}",
+        f"Limit rows : {args.limit_rows if args.limit_rows is not None else 'aucune'}",
+        f"Dry-run : {'oui' if args.dry_run else 'non'}",
+    ]
+
+    if not confirm_settings(summary_lines):
+        raise SystemExit("Exécution annulée par l'utilisateur.")
+
+    return args
 
 
 def create_client() -> OpenAI:
@@ -397,6 +689,12 @@ def reformulate_rows(
 
 def main() -> None:
     args = parse_args()
+
+    if args.interactive:
+        args = interactive_configure(args)
+
+    if not args.input:
+        raise SystemExit("Option --input requise (ou utilisez --interactive pour l'assistant).")
 
     clear_terminal()
     print_banner()

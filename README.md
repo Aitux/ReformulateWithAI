@@ -128,6 +128,13 @@ Service `reformulator` mounts the project at `/workspace`, injects `OPENAI_API_K
 3. Run `docker compose run --rm reformulator`.
 4. Collect the generated `gesform_export_formation_prod_20250925_rewritten.csv`.
 
+### Interactive mode
+Launch a guided setup when you prefer to supply parameters step by step:
+```bash
+uv run python reformulate_moduledescription.py --interactive
+```
+The wizard masks your existing `OPENAI_API_KEY`, prompts for input/output CSV paths, target column, model, worker count, retry policy, optional row limits, and lets you toggle `--dry-run` before starting.
+
 ---
 
 ## Project structure
