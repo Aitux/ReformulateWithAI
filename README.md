@@ -133,7 +133,7 @@ Launch a guided setup when you prefer to supply parameters step by step:
 ```bash
 uv run python reformulate_moduledescription.py --interactive
 ```
-The wizard masks your existing `OPENAI_API_KEY`, prompts for input/output CSV paths, target column, model, worker count, retry policy, optional row limits, and lets you toggle `--dry-run` before starting.
+The wizard clears the screen between questions, reprints the ASCII banner, and uses colored cues so you can distinguish context (cyan) from actionable prompts (yellow). It masks your existing `OPENAI_API_KEY`, validates file paths, and walks you through column, model, workers, retry policy, optional row limits, and the dry-run toggle before summarizing the run.
 
 ---
 
